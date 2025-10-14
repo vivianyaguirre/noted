@@ -1,0 +1,9 @@
+
+google-genai==0.3.0   # official Gemini SDK (avoids writing JSON by hand)
+gTTS==2.5.3           # free text-to-speech (MP3)
+pydub==0.25.1         # join MP3 chunks (needs ffmpeg installed)
+pypdf==4.3.1          # read PDFs
+python-docx==1.1.2    # read .docx
+pillow==10.4.0        # image I/O for OCR
+pytesseract==0.3.13   # OCR (requires Tesseract app installed)
+toml==0.10.2          # read config.toml
