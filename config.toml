@@ -4,7 +4,7 @@
 
 
 
-gemini_api_key = "API_KEY"
+gemini_api_key = "YOUR_API_KEY"
 gemini_model   = "gemini-1.5-flash"
 target_lufs    = -19.0
 sample_rate    = 44100
