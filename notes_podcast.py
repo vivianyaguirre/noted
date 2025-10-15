@@ -8,6 +8,10 @@ from docx import Document as DocxDocument
 from PIL import Image
 import pytesseract
 
+
+import time, re
+from google import genai
+
 from config import config
 
 
@@ -51,6 +55,60 @@ def extract_text(paths) -> str:
             except Exception:
                 pass
     return "\n\n".join(c for c in chunks if c.strip())
+
+
+# --- Gemini (SDK) ---
+gclient = genai.Client(api_key=config.gemini_api_key)
+
+def chunk_text(s: str, size: int = 1800):
+    return [s[i:i+size] for i in range(0, len(s), size)]
+
+def gen_text(prompt: str) -> str:
+    """One-shot text generation via Gemini."""
+    resp = gclient.models.generate_content(
+        model=config.gemini_model,
+        contents=prompt
+    )
+    return (resp.text or "").strip()
+
+def summarize_long_text(raw_text: str) -> str:
+    """Map-reduce: summarize pieces, then combine once (free-tier friendly)."""
+    bullets = []
+    for ch in chunk_text(raw_text, 1800):
+        p = (
+            "Summarize the following notes for a student in crisp bullet points.\n"
+            "Include key terms/definitions and one example if present.\n\n"
+            f"Notes chunk:\n{ch}"
+        )
+        bullets.append(gen_text(p))
+        time.sleep(0.2)  # gentle throttle
+
+    merged = gen_text(
+        "Combine these chunk summaries into one outline with headings and bullets. "
+        "De-duplicate repeats. Keep to ~250–350 words.\n\n" + "\n\n".join(bullets)
+    )
+    return merged
+
+def build_podcast_script(topic: str, merged_outline: str) -> str:
+    """One call that also fills gaps & corrects misinformation inside the script."""
+    p = (
+        "You are two engaging podcast hosts, 'Alex' and 'Riley'.\n"
+        "Create an 8–10 minute podcast script about the TOPIC below.\n"
+        "Agenda:\n"
+        "  - Open with a hook (30–45 sec)\n"
+        "  - Segment A: Key ideas from the outline\n"
+        "  - Segment B: Fill knowledge gaps & correct any likely misconceptions\n"
+        "  - Segment C: Practical examples or mini case study\n"
+        "  - 30-sec recap + 2 reflective questions\n\n"
+        "Rules:\n"
+        "  - Alternate speakers line-by-line: 'Alex: ...' then 'Riley: ...'\n"
+        "  - Be clear and accurate. If the outline is missing context, add concise background.\n"
+        "  - If a claim seems dubious, fix it or flag it briefly and give a correct explanation.\n"
+        "  - Keep lines short and conversational.\n\n"
+        f"TOPIC: {topic}\n\n"
+        f"OUTLINE:\n{merged_outline}\n"
+    )
+    return gen_text(p)
 
 
 class App:
@@ -126,19 +184,32 @@ class App:
         if not self.files:
             messagebox.showinfo("NOTED", "Add at least one file first.")
             return
+        topic = self.topic_var.get().strip() or "Untitled Topic"
+
         self.status.set("Extracting text…")
         self.script_txt.delete("1.0", tk.END)
         self.save_btn.config(state="disabled")
         self.generated_script = ""
+        self.add_btn.config(state="disabled"); self.gen_btn.config(state="disabled"); self.root.update_idletasks()
 
         raw = extract_text(self.files)
         if not raw.strip():
             messagebox.showerror("NOTED", "No text found. Check OCR (Tesseract) for images.")
+            self.add_btn.config(state="normal"); self.gen_btn.config(state="normal")
             return
 
-        # We will add Gemini summarization + script next
-        self.script_txt.insert(tk.END, raw[:1200] + ("\n...\n" if len(raw) > 1200 else ""))
-        self.status.set("Notes extracted. Next: Gemini summarization (coming up).")
+        self.status.set("Summarizing notes (Gemini)…")
+        merged = summarize_long_text(raw)
+
+        self.status.set("Building podcast script (Gemini)…")
+        script = build_podcast_script(topic, merged)
+
+        # show + enable save
+        self.generated_script = script
+        self.script_txt.insert(tk.END, script)
+        self.save_btn.config(state="normal")
+        self.status.set("Script ready. Click 'Save MP3' to render audio.")
+        self.add_btn.config(state="normal"); self.gen_btn.config(state="normal")
 
     def save_mp3(self):
         messagebox.showinfo("NOTED", "We’ll add MP3 synthesis next.")
